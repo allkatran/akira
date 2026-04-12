@@ -123,6 +123,10 @@ jobs:
       contents: write
 
     steps:
+      - name: Set date tag
+        id: tag
+        run: echo "date=$(date -u +'%Y-%m-%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -132,24 +136,32 @@ jobs:
         run: |
           mkdir -p switch
           cp akira.nro switch/akira.nro
-          zip -r akira-canary.zip switch/
-
-      - name: Delete existing canary release
-        run: gh release delete canary --yes --cleanup-tag || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
+          zip -r akira-canary-${{ steps.tag.outputs.date }}.zip switch/
 
       - name: Create canary release
         uses: softprops/action-gh-release@b25b93d384199fc0fc8c2e126b2d937a0cbeb2ae # v2
         with:
-          tag_name: canary
-          name: "Canary Build"
+          tag_name: canary-${{ steps.tag.outputs.date }}
+          name: "Canary Build ${{ steps.tag.outputs.date }}"
           files: |
-            akira-canary.zip
+            akira-canary-${{ steps.tag.outputs.date }}.zip
             akira.nro
             akira.elf
             akira-companion-*
           draft: false
           prerelease: true
-          body: "Latest canary build from `master` — ${{ github.sha }}"
+          body: "Canary build from `master` — ${{ steps.tag.outputs.date }} (${{ github.sha }})"
+
+      - name: Prune old canary releases (keep latest 10)
+        run: |
+          gh release list --json tagName --jq '.[].tagName' |
+            grep '^canary-' |
+            sort -r |
+            tail -n +11 |
+            while read -r tag; do
+              echo "Deleting release $tag"
+              gh release delete "$tag" --yes --cleanup-tag
+            done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
