@@ -72,6 +72,7 @@ Actually, just read the whole wiki.
 <p align="center">
   <img src="readme/akira_ingame_spiderman_1.jpg" >
   <img src="readme/akira_ingame_jedi_1.jpg" >
+  <img src="readme/akira_ingame_ac_1.jpg" >
 </p>
 
 <p align="center">
@@ -95,7 +96,7 @@ This software was built with reference/code from:
 - [moonlight-switch](https://github.com/XITRIX/Moonlight-Switch) XITRIX's deko3d renderer for moonlight for the deko3d bits
 - [switchfin](https://github.com/dragonflylee/switchfin/blob/bbcf9037fc3b11a78f5e0b7489d9e776fff2d99c/scripts/switch/mpv/deko3d.patch#L371) The patches used by dragonflylee in switchfin
 - [wiliwili](github.com/xfangfang/wiliwili) WiliWili for how to get started with this new borealis api.
-
+- [duckstation](https://github.com/RSDuck/duckstation) Duckstation's uam fork for runtime shader compilation
 
 ## Credits
 - [PS5 icons by Zacksly, please support him here:](https://zacksly.itch.io/ps5-button-icons-and-controls)
