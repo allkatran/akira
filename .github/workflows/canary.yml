@@ -150,5 +150,6 @@ jobs:
             akira.nro
             akira.elf
             akira-companion-*
+          draft: false
           prerelease: true
           body: "Latest canary build from `master` — ${{ github.sha }}"

@@ -136,6 +136,7 @@ jobs:
             akira.nro
             akira.elf
             akira-companion-*
+          draft: false
           prerelease: true
           body: "Automated weekly build from `master` — ${{ steps.tag.outputs.date }} (${{ github.sha }})"
 
