@@ -3,12 +3,15 @@ module akira-companion
 go 1.25
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/charmbracelet/lipgloss v1.0.0
-	github.com/mdp/qrterminal/v3 v3.2.0
+	github.com/mdp/qrterminal/v3 v3.2.1
+	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/pion/stun/v3 v3.0.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	golang.org/x/text v0.32.0
 )
 
 require (
@@ -30,9 +33,8 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.32.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/term v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

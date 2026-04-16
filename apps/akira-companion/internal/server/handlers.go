@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+
+	"akira-companion/internal/i18n"
 )
 
 type StatusResponse struct {
@@ -14,7 +16,7 @@ type StatusResponse struct {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, i18n.T("server.err_method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -37,13 +39,13 @@ type DUIDResponse struct {
 
 func (s *Server) handleDUID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, i18n.T("server.err_method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
 	duid := s.state.GetDUID()
 	if duid == "" {
-		http.Error(w, "DUID not configured", http.StatusNotFound)
+		http.Error(w, i18n.T("server.err_duid_not_configured"), http.StatusNotFound)
 		return
 	}
 
@@ -60,13 +62,13 @@ type TokenResponse struct {
 
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, i18n.T("server.err_method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
 	tokenInfo := s.state.GetTokenInfo()
 	if !tokenInfo.HasAccessToken {
-		http.Error(w, "No access token available", http.StatusNotFound)
+		http.Error(w, i18n.T("server.err_no_token"), http.StatusNotFound)
 		return
 	}
 
@@ -86,13 +88,13 @@ type AccountResponse struct {
 
 func (s *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, i18n.T("server.err_method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
 	account := s.state.GetAccountInfo()
 	if account == nil || account.AccountID == "" {
-		http.Error(w, "Account information not available", http.StatusNotFound)
+		http.Error(w, i18n.T("server.err_no_account"), http.StatusNotFound)
 		return
 	}
 

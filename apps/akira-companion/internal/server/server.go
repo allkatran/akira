@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"akira-companion/internal/i18n"
 	"akira-companion/internal/state"
 )
 
@@ -37,7 +38,7 @@ func (s *Server) Start(port int) error {
 	defer s.mu.Unlock()
 
 	if s.httpServer != nil {
-		return fmt.Errorf("server already running")
+		return fmt.Errorf("%s", i18n.T("server.err_already_running"))
 	}
 
 	mux := http.NewServeMux()
@@ -55,7 +56,7 @@ func (s *Server) Start(port int) error {
 
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
-			fmt.Printf("HTTP server error: %v\n", err)
+			fmt.Printf("%s\n", i18n.Tf("server.err_http", map[string]interface{}{"Error": err}))
 		}
 	}()
 

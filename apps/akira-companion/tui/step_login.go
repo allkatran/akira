@@ -2,9 +2,9 @@ package tui
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 
+	"akira-companion/internal/i18n"
 	"akira-companion/internal/psn"
 	"akira-companion/internal/state"
 
@@ -35,7 +35,7 @@ type LoginModel struct {
 
 func NewLoginModel(s *state.AppState) LoginModel {
 	redirectInput := textinput.New()
-	redirectInput.Placeholder = "Paste the redirect URL here..."
+	redirectInput.Placeholder = i18n.T("login.placeholder_redirect")
 	redirectInput.CharLimit = 2048
 	redirectInput.Width = 60
 
@@ -43,14 +43,24 @@ func NewLoginModel(s *state.AppState) LoginModel {
 	loginURL := psn.GenerateLoginURL(duid)
 
 	var qrBuf bytes.Buffer
-	qrterminal.GenerateHalfBlock(loginURL, qrterminal.L, &qrBuf)
+	qrCfg := qrterminal.Config{
+		Level:          qrterminal.L,
+		Writer:         &qrBuf,
+		QuietZone:      1,
+		HalfBlocks:     true,
+		BlackChar:      qrterminal.BLACK_BLACK,
+		WhiteChar:      qrterminal.WHITE_WHITE,
+		WhiteBlackChar: qrterminal.WHITE_BLACK,
+		BlackWhiteChar: qrterminal.BLACK_WHITE,
+	}
+	qrterminal.GenerateWithConfig(loginURL, qrCfg)
 
 	return LoginModel{
-		state:        s,
-		loginState:   loginStateShowURL,
+		state:         s,
+		loginState:    loginStateShowURL,
 		redirectInput: redirectInput,
-		loginURL:     loginURL,
-		qrCode:       qrBuf.String(),
+		loginURL:      loginURL,
+		qrCode:        qrBuf.String(),
 	}
 }
 
@@ -75,7 +85,7 @@ func (m LoginModel) Update(msg tea.Msg) (LoginModel, tea.Cmd) {
 		} else {
 			m.loginState = loginStateSuccess
 			m.accountInfo = m.state.GetAccountInfo()
-			m.message = "Login successful!"
+			m.message = i18n.T("login.msg_success")
 		}
 		return m, nil
 	}
@@ -175,51 +185,53 @@ func (m LoginModel) View() string {
 
 	switch m.loginState {
 	case loginStateShowURL:
-		b.WriteString("Login to PlayStation Network\n\n")
-		b.WriteString(WarningStyle.Render(">>> OPEN THIS URL IN A WINDOWS BROWSER (SONY BLOCKS LINUX) <<<"))
+		b.WriteString(i18n.T("login.title") + "\n\n")
+		b.WriteString(WarningStyle.Render(i18n.T("login.url_warning")))
 		b.WriteString("\n\n")
 		b.WriteString(m.loginURL)
 		b.WriteString("\n\n")
-		b.WriteString(WarningStyle.Render(">>> OR SCAN THIS QR CODE WITH YOUR PHONE <<<"))
+		b.WriteString(WarningStyle.Render(i18n.T("login.qr_warning")))
 		b.WriteString("\n")
 		b.WriteString(m.qrCode)
 		b.WriteString("\n")
-		b.WriteString(MutedStyle.Render("Press Enter when ready to paste the redirect URL"))
+		b.WriteString(MutedStyle.Render(i18n.T("login.press_enter_ready")))
 
 	case loginStateWaitingForRedirect:
-		b.WriteString("Paste the redirect URL after logging in:\n\n")
+		b.WriteString(i18n.T("login.paste_prompt") + "\n\n")
 		b.WriteString(m.redirectInput.View())
 		b.WriteString("\n\n")
-		b.WriteString(MutedStyle.Render("The URL starts with: https://remoteplay.dl.playstation.net/remoteplay/redirect?..."))
+		b.WriteString(MutedStyle.Render(i18n.T("login.redirect_hint")))
 		b.WriteString("\n")
-		b.WriteString(MutedStyle.Render("Press Enter to submit, Esc to go back"))
+		b.WriteString(MutedStyle.Render(i18n.T("login.submit_help")))
 
 	case loginStateExchanging:
-		b.WriteString("Exchanging authorization code for tokens...\n\n")
-		b.WriteString(MutedStyle.Render("Please wait..."))
+		b.WriteString(i18n.T("login.exchanging") + "\n\n")
+		b.WriteString(MutedStyle.Render(i18n.T("login.please_wait")))
 
 	case loginStateSuccess:
-		b.WriteString(SuccessStyle.Render("✓ Login Successful!"))
+		b.WriteString(SuccessStyle.Render(i18n.T("login.success")))
 		b.WriteString("\n\n")
 		if m.accountInfo != nil {
-			b.WriteString(fmt.Sprintf("Online ID: %s\n", m.accountInfo.OnlineID))
-			b.WriteString(fmt.Sprintf("Account ID: %s\n", m.accountInfo.AccountID))
+			b.WriteString(i18n.Tf("login.online_id", map[string]interface{}{"ID": m.accountInfo.OnlineID}) + "\n")
+			b.WriteString(i18n.Tf("login.account_id", map[string]interface{}{"ID": m.accountInfo.AccountID}) + "\n")
 		}
 		tokenInfo := m.state.GetTokenInfo()
 		if tokenInfo.HasAccessToken {
-			b.WriteString(fmt.Sprintf("\nAccess Token: %s...\n", tokenInfo.AccessToken[:20]))
-			b.WriteString(fmt.Sprintf("Refresh Token: %s...\n", tokenInfo.RefreshToken[:20]))
+			b.WriteString("\n")
+			b.WriteString(i18n.Tf("login.access_token", map[string]interface{}{"Token": tokenInfo.AccessToken[:20]}) + "\n")
+			b.WriteString(i18n.Tf("login.refresh_token", map[string]interface{}{"Token": tokenInfo.RefreshToken[:20]}) + "\n")
 		}
 		b.WriteString("\n")
-		b.WriteString(MutedStyle.Render("Press 'n' to continue, 'r' to redo login"))
+		b.WriteString(MutedStyle.Render(i18n.T("login.continue_help")))
 
 	case loginStateError:
-		b.WriteString(ErrorStyle.Render("✗ Login Failed"))
+		b.WriteString(ErrorStyle.Render(i18n.T("login.failed")))
 		b.WriteString("\n\n")
 		b.WriteString(ErrorStyle.Render(m.message))
 		b.WriteString("\n\n")
-		b.WriteString(MutedStyle.Render("Press Enter or 'r' to retry"))
+		b.WriteString(MutedStyle.Render(i18n.T("login.retry_help")))
 	}
 
 	return b.String()
 }
+

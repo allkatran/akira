@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
+	"akira-companion/internal/i18n"
 	"akira-companion/internal/state"
 	"akira-companion/tui"
 
@@ -11,16 +13,21 @@ import (
 )
 
 func main() {
+	lang := flag.String("lang", "en", "language code (e.g. en, ja, zh)")
+	flag.Parse()
+
+	i18n.Init(*lang)
+
 	appState := state.NewAppState()
 	if err := appState.Load(); err != nil {
-		fmt.Printf("Warning: Could not load state: %v\n", err)
+		fmt.Printf("%s\n", i18n.Tf("app.warning_load_state", map[string]interface{}{"Error": err}))
 	}
 
 	model := tui.NewModel(appState)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Error running program: %v\n", err)
+		fmt.Printf("%s\n", i18n.Tf("app.error_running", map[string]interface{}{"Error": err}))
 		os.Exit(1)
 	}
 }
