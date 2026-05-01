@@ -56,13 +56,13 @@ other = "配置你的设备唯一标识符（DUID）"
 other = "随机生成 DUID"
 
 [duid.option_seed]
-other = "通过种子短语生成（可复现）"
+other = "通过自定义口令生成（每次生成结果相同）"
 
 [duid.option_manual]
 other = "手动输入 DUID"
 
 [duid.seed_label]
-other = "种子短语："
+other = "自定义口令："
 
 [duid.manual_label]
 other = "DUID（48位十六进制字符）："
@@ -83,13 +83,13 @@ other = "尚未配置 DUID"
 other = "随机 DUID 已生成！"
 
 [duid.msg_from_seed]
-other = "通过种子短语生成 DUID 成功！"
+other = "通过自定义口令生成 DUID 成功！"
 
 [duid.msg_saved]
 other = "DUID 已保存！"
 
 [duid.placeholder_seed]
-other = "输入种子短语..."
+other = "输入自定义口令..."
 
 [duid.placeholder_manual]
 other = "输入48位十六进制 DUID..."
