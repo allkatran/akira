@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"akira-companion/internal/i18n"
 	"akira-companion/internal/server"
 	"akira-companion/internal/state"
 
@@ -63,7 +64,7 @@ func (m ServerModel) handleKeyMsg(msg tea.KeyMsg) (ServerModel, tea.Cmd) {
 	case "s":
 		if m.serverRunning {
 			m.stopServer()
-			m.message = "Server stopped"
+			m.message = i18n.T("server.msg_stopped")
 			m.isError = false
 		} else {
 			port := 8080
@@ -71,7 +72,7 @@ func (m ServerModel) handleKeyMsg(msg tea.KeyMsg) (ServerModel, tea.Cmd) {
 				fmt.Sscanf(p, "%d", &port)
 			}
 			if port < 1 || port > 65535 {
-				m.message = "Invalid port number"
+				m.message = i18n.T("server.msg_invalid_port")
 				m.isError = true
 				return m, nil
 			}
@@ -80,13 +81,13 @@ func (m ServerModel) handleKeyMsg(msg tea.KeyMsg) (ServerModel, tea.Cmd) {
 				m.message = err.Error()
 				m.isError = true
 			} else {
-				m.message = fmt.Sprintf("Server started on port %d", port)
+				m.message = i18n.Tf("server.msg_started", map[string]interface{}{"Port": port})
 				m.isError = false
 			}
 		}
 	case "r":
 		m.localIPs = getLocalIPs()
-		m.message = "IP addresses refreshed"
+		m.message = i18n.T("server.msg_ips_refreshed")
 		m.isError = false
 	}
 
@@ -113,7 +114,7 @@ func (m *ServerModel) stopServer() {
 func (m ServerModel) View() string {
 	var b strings.Builder
 
-	b.WriteString("PSN Credentials\n")
+	b.WriteString(i18n.T("server.credentials_title") + "\n")
 	b.WriteString(DividerStyle.Render())
 	b.WriteString("\n")
 
@@ -121,10 +122,10 @@ func (m ServerModel) View() string {
 	tokenInfo := m.state.GetTokenInfo()
 
 	if accountInfo != nil {
-		b.WriteString(fmt.Sprintf("  Online ID:  %s\n", SuccessStyle.Render(accountInfo.OnlineID)))
-		b.WriteString(fmt.Sprintf("  Account ID: %s\n", MutedStyle.Render(accountInfo.AccountID)))
+		b.WriteString(i18n.Tf("server.online_id", map[string]interface{}{"ID": SuccessStyle.Render(accountInfo.OnlineID)}) + "\n")
+		b.WriteString(i18n.Tf("server.account_id", map[string]interface{}{"ID": MutedStyle.Render(accountInfo.AccountID)}) + "\n")
 	} else {
-		b.WriteString(MutedStyle.Render("  No account info available\n"))
+		b.WriteString(MutedStyle.Render(i18n.T("server.no_account_info")) + "\n")
 	}
 
 	if tokenInfo.HasAccessToken {
@@ -133,35 +134,35 @@ func (m ServerModel) View() string {
 
 		var expiryStr string
 		if tokenInfo.IsExpired {
-			expiryStr = ErrorStyle.Render("EXPIRED")
+			expiryStr = ErrorStyle.Render(i18n.T("server.token_expired"))
 		} else if timeUntilExpiry < time.Hour {
-			expiryStr = WarningStyle.Render(fmt.Sprintf("in %d minutes", int(timeUntilExpiry.Minutes())))
+			expiryStr = WarningStyle.Render(i18n.Tf("server.token_expires_minutes", map[string]interface{}{"Minutes": int(timeUntilExpiry.Minutes())}))
 		} else {
 			expiryStr = SuccessStyle.Render(expiryTime.Format("Jan 02, 2006 03:04 PM"))
 		}
-		b.WriteString(fmt.Sprintf("  Token Expires: %s\n", expiryStr))
+		b.WriteString(i18n.Tf("server.token_expires_label", map[string]interface{}{"Expiry": expiryStr}) + "\n")
 	}
 
 	b.WriteString("\n")
 
-	b.WriteString("HTTP Server for Nintendo Switch\n")
+	b.WriteString(i18n.T("server.http_title") + "\n")
 	b.WriteString(DividerStyle.Render())
 	b.WriteString("\n")
 
 	if m.serverRunning {
-		b.WriteString(SuccessStyle.Render("● Server Running"))
-		b.WriteString(fmt.Sprintf(" on port %d\n\n", m.port))
+		b.WriteString(SuccessStyle.Render(i18n.T("server.running")))
+		b.WriteString(i18n.Tf("server.running_port", map[string]interface{}{"Port": m.port}) + "\n\n")
 	} else {
-		b.WriteString(MutedStyle.Render("○ Server Stopped"))
+		b.WriteString(MutedStyle.Render(i18n.T("server.stopped")))
 		b.WriteString("\n\n")
-		b.WriteString("Port: ")
+		b.WriteString(i18n.T("server.port_label"))
 		b.WriteString(m.portInput.View())
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString("Local IP Addresses:\n")
+	b.WriteString(i18n.T("server.local_ips_title") + "\n")
 	if len(m.localIPs) == 0 {
-		b.WriteString(MutedStyle.Render("  No network interfaces found"))
+		b.WriteString(MutedStyle.Render(i18n.T("server.no_interfaces")))
 	} else {
 		for _, ip := range m.localIPs {
 			if m.serverRunning {
@@ -173,18 +174,18 @@ func (m ServerModel) View() string {
 	}
 
 	if m.serverRunning {
-		b.WriteString("\nEndpoints for Switch:\n")
-		b.WriteString(MutedStyle.Render("  GET /status  - Check companion status\n"))
-		b.WriteString(MutedStyle.Render("  GET /account - Get PSN account info\n"))
-		b.WriteString(MutedStyle.Render("  GET /token   - Get PSN tokens\n"))
-		b.WriteString(MutedStyle.Render("  GET /duid    - Get current DUID\n"))
+		b.WriteString("\n" + i18n.T("server.endpoints_title") + "\n")
+		b.WriteString(MutedStyle.Render(i18n.T("server.endpoint_status")) + "\n")
+		b.WriteString(MutedStyle.Render(i18n.T("server.endpoint_account")) + "\n")
+		b.WriteString(MutedStyle.Render(i18n.T("server.endpoint_token")) + "\n")
+		b.WriteString(MutedStyle.Render(i18n.T("server.endpoint_duid")) + "\n")
 	}
 
 	b.WriteString("\n")
 	if m.serverRunning {
-		b.WriteString(MutedStyle.Render("Press 's' to stop server, 'r' to refresh IPs"))
+		b.WriteString(MutedStyle.Render(i18n.T("server.help_running")))
 	} else {
-		b.WriteString(MutedStyle.Render("Press 's' to start server, 'r' to refresh IPs"))
+		b.WriteString(MutedStyle.Render(i18n.T("server.help_stopped")))
 	}
 
 	if m.message != "" {

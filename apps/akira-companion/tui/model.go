@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"akira-companion/internal/i18n"
 	"akira-companion/internal/nat"
 	"akira-companion/internal/state"
 
@@ -125,17 +126,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	var b strings.Builder
 
-	b.WriteString(TitleStyle.Render("AKIRA COMPANION"))
+	b.WriteString(TitleStyle.Render(i18n.T("app.title")))
 	b.WriteString("\n\n")
 
 	b.WriteString(m.renderNATInfo())
 	b.WriteString("\n\n")
 
-	b.WriteString(m.renderStepIndicator(StepDUID, "Configure DUID"))
+	b.WriteString(m.renderStepIndicator(StepDUID, i18n.T("step.configure_duid")))
 	b.WriteString("\n")
-	b.WriteString(m.renderStepIndicator(StepLogin, "PSN Login"))
+	b.WriteString(m.renderStepIndicator(StepLogin, i18n.T("step.psn_login")))
 	b.WriteString("\n")
-	b.WriteString(m.renderStepIndicator(StepServer, "Start Server"))
+	b.WriteString(m.renderStepIndicator(StepServer, i18n.T("step.start_server")))
 	b.WriteString("\n\n")
 
 	b.WriteString(DividerStyle.Render())
@@ -151,7 +152,7 @@ func (m Model) View() string {
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(HelpStyle.Render("Press q to quit"))
+	b.WriteString(HelpStyle.Render(i18n.T("app.quit_help")))
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
 }
@@ -180,17 +181,43 @@ func CompleteStep() tea.Msg {
 	return StepCompleteMsg{}
 }
 
+func mappingLabel(m nat.MappingType) string {
+	switch m {
+	case nat.MappingEndpointIndependent:
+		return i18n.T("nat.endpoint_independent")
+	case nat.MappingAddressDependent:
+		return i18n.T("nat.address_dependent")
+	case nat.MappingAddressPortDependent:
+		return i18n.T("nat.address_port_dependent")
+	default:
+		return i18n.T("nat.unknown")
+	}
+}
+
+func filteringLabel(f nat.FilteringType) string {
+	switch f {
+	case nat.FilteringEndpointIndependent:
+		return i18n.T("nat.endpoint_independent")
+	case nat.FilteringAddressDependent:
+		return i18n.T("nat.address_dependent")
+	case nat.FilteringAddressPortDependent:
+		return i18n.T("nat.address_port_dependent")
+	default:
+		return i18n.T("nat.unknown")
+	}
+}
+
 func (m Model) renderNATInfo() string {
 	if m.natLoading {
-		return MutedStyle.Render("Network: ") + MutedStyle.Render("Detecting NAT type...")
+		return MutedStyle.Render(i18n.T("nat.network_label")) + MutedStyle.Render(i18n.T("nat.detecting"))
 	}
 
 	if m.natResult == nil {
-		return MutedStyle.Render("Network: ") + MutedStyle.Render("Unknown")
+		return MutedStyle.Render(i18n.T("nat.network_label")) + MutedStyle.Render(i18n.T("nat.unknown"))
 	}
 
 	if m.natResult.Error != nil {
-		return MutedStyle.Render("Network: ") + ErrorStyle.Render("Failed: "+m.natResult.Error.Error())
+		return MutedStyle.Render(i18n.T("nat.network_label")) + ErrorStyle.Render(i18n.Tf("nat.failed", map[string]interface{}{"Error": m.natResult.Error.Error()}))
 	}
 
 	var mappingStyle, filteringStyle lipgloss.Style
@@ -214,8 +241,8 @@ func (m Model) renderNATInfo() string {
 		filteringStyle = MutedStyle
 	}
 
-	result := MutedStyle.Render("Mapping:   ") + mappingStyle.Render(m.natResult.Mapping.String()) + "\n"
-	result += MutedStyle.Render("Filtering: ") + filteringStyle.Render(m.natResult.Filtering.String()) + "\n"
-	result += MutedStyle.Render("External:  ") + MutedStyle.Render(m.natResult.ExternalIP)
+	result := MutedStyle.Render(i18n.T("nat.mapping_label")) + mappingStyle.Render(mappingLabel(m.natResult.Mapping)) + "\n"
+	result += MutedStyle.Render(i18n.T("nat.filtering_label")) + filteringStyle.Render(filteringLabel(m.natResult.Filtering)) + "\n"
+	result += MutedStyle.Render(i18n.T("nat.external_label")) + MutedStyle.Render(m.natResult.ExternalIP)
 	return result
 }

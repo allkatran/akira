@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"akira-companion/internal/i18n"
 	"akira-companion/internal/psn"
 	"akira-companion/internal/state"
 
@@ -32,11 +33,11 @@ type DUIDModel struct {
 
 func NewDUIDModel(s *state.AppState) DUIDModel {
 	seedInput := textinput.New()
-	seedInput.Placeholder = "Enter a seed phrase..."
+	seedInput.Placeholder = i18n.T("duid.placeholder_seed")
 	seedInput.CharLimit = 256
 
 	manualInput := textinput.New()
-	manualInput.Placeholder = "Enter 48-character hex DUID..."
+	manualInput.Placeholder = i18n.T("duid.placeholder_manual")
 	manualInput.CharLimit = 48
 
 	return DUIDModel{
@@ -90,7 +91,7 @@ func (m DUIDModel) handleMenuMode(msg tea.KeyMsg) (DUIDModel, tea.Cmd) {
 			m.state.SetDUID(duid)
 			m.state.Save()
 			m.currentDUID = duid
-			m.message = "Random DUID generated!"
+			m.message = i18n.T("duid.msg_random")
 			m.isError = false
 		case actionGenerateFromSeed:
 			m.inputActive = true
@@ -126,7 +127,7 @@ func (m DUIDModel) handleInputMode(msg tea.KeyMsg) (DUIDModel, tea.Cmd) {
 				m.state.SetSeed(seed)
 				m.state.Save()
 				m.currentDUID = duid
-				m.message = "DUID generated from seed!"
+				m.message = i18n.T("duid.msg_from_seed")
 				m.isError = false
 			}
 		case actionEnterManual:
@@ -139,7 +140,7 @@ func (m DUIDModel) handleInputMode(msg tea.KeyMsg) (DUIDModel, tea.Cmd) {
 			m.state.SetDUID(duid)
 			m.state.Save()
 			m.currentDUID = duid
-			m.message = "DUID saved!"
+			m.message = i18n.T("duid.msg_saved")
 			m.isError = false
 		}
 		m.inputActive = false
@@ -161,12 +162,12 @@ func (m DUIDModel) handleInputMode(msg tea.KeyMsg) (DUIDModel, tea.Cmd) {
 func (m DUIDModel) View() string {
 	var b strings.Builder
 
-	b.WriteString("Configure your Device Unique ID (DUID)\n\n")
+	b.WriteString(i18n.T("duid.title") + "\n\n")
 
 	options := []string{
-		"Generate random DUID",
-		"Generate from seed (reproducible)",
-		"Enter DUID manually",
+		i18n.T("duid.option_random"),
+		i18n.T("duid.option_seed"),
+		i18n.T("duid.option_manual"),
 	}
 
 	for i, opt := range options {
@@ -181,26 +182,26 @@ func (m DUIDModel) View() string {
 		b.WriteString("\n")
 		switch m.currentAction {
 		case actionGenerateFromSeed:
-			b.WriteString(InputLabelStyle.Render("Seed phrase:"))
+			b.WriteString(InputLabelStyle.Render(i18n.T("duid.seed_label")))
 			b.WriteString("\n")
 			b.WriteString(m.seedInput.View())
 		case actionEnterManual:
-			b.WriteString(InputLabelStyle.Render("DUID (48 hex characters):"))
+			b.WriteString(InputLabelStyle.Render(i18n.T("duid.manual_label")))
 			b.WriteString("\n")
 			b.WriteString(m.manualInput.View())
 		}
 		b.WriteString("\n")
-		b.WriteString(MutedStyle.Render("Press Enter to confirm, Esc to cancel"))
+		b.WriteString(MutedStyle.Render(i18n.T("duid.input_help")))
 	}
 
 	b.WriteString("\n\n")
 	if m.currentDUID != "" {
-		b.WriteString(SuccessStyle.Render("Current DUID: "))
+		b.WriteString(SuccessStyle.Render(i18n.T("duid.current")))
 		b.WriteString(m.currentDUID)
 		b.WriteString("\n\n")
-		b.WriteString(MutedStyle.Render("Press 'n' to continue to next step"))
+		b.WriteString(MutedStyle.Render(i18n.T("duid.continue_help")))
 	} else {
-		b.WriteString(MutedStyle.Render("No DUID configured yet"))
+		b.WriteString(MutedStyle.Render(i18n.T("duid.none_configured")))
 	}
 
 	if m.message != "" {
