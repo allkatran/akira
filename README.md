@@ -1,6 +1,6 @@
 # Akira
 
-![HOS-Supported](https://img.shields.io/badge/HOS_Version-22.1.0-green) ![Atmosphere](https://img.shields.io/badge/Atmosphere-1.11.1-cyan) ![libnx](https://img.shields.io/badge/libnx-4.12.0-magenta)
+![HOS-Supported](https://img.shields.io/badge/HOS_Version-22.5.0-green) ![Atmosphere](https://img.shields.io/badge/Atmosphere-1.11.2-cyan) ![libnx](https://img.shields.io/badge/libnx-4.12.0-magenta)
 
 
 Akira is a hombrew application built with xfangfang's fork of [borealis](https://github.com/xfangfang/borealis) that utilises a forked variant of [chiaki-ng](https://github.com/streetpea/chiaki-ng) on the Nintendo Switch.
