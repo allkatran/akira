@@ -2,8 +2,9 @@
 #define AKIRA_IO_VIDEO_DECODER_HPP
 
 #include <cstdint>
+#include <functional>
+#include <utility>
 #include <chiaki/log.h>
-#include "stream/frame_queue.hpp"
 
 extern "C"
 {
@@ -13,6 +14,8 @@ extern "C"
 class VideoDecoder
 {
 public:
+    using FrameReadyCallback = std::function<void(AVFrame*)>;
+
     VideoDecoder();
     ~VideoDecoder();
 
@@ -21,6 +24,7 @@ public:
     VideoDecoder& operator=(const VideoDecoder&) = delete;
 
     void setLogger(ChiakiLog* log) { m_log = log; }
+    void setFrameReadyCallback(FrameReadyCallback callback) { m_frame_ready_callback = std::move(callback); }
 
     // Initialize codec (H.264 or HEVC for PS5)
     // For deko3d, width/height are required for NVTEGRA hardware decoder
@@ -38,9 +42,6 @@ public:
     // Cleanup
     void cleanup();
 
-    // Get frame queue for renderer access
-    FrameQueue* getFrameQueue() { return &m_frame_queue; }
-
     int getVideoWidth() const { return m_video_width; }
     int getVideoHeight() const { return m_video_height; }
     void updateResolution(int width, int height) { m_video_width = width; m_video_height = height; }
@@ -55,7 +56,7 @@ private:
     AVBufferRef* m_hw_device_ctx = nullptr;
     AVFrame* m_tmp_frame = nullptr;
 
-    FrameQueue m_frame_queue;
+    FrameReadyCallback m_frame_ready_callback;
 
     int m_video_width = 0;
     int m_video_height = 0;

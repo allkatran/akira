@@ -227,7 +227,6 @@ bool Deko3dRenderer::initialize(int frame_width, int frame_height, ChiakiLog* lo
     brls::Logger::info("Deko3dRenderer: shaders and vertex buffer initialized");
 
     initTextRendering();
-    registerCallback();
 
     m_initialized = true;
     return true;
@@ -686,7 +685,42 @@ void Deko3dRenderer::draw(AVFrame* frame)
     m_frame_bound = true;
 }
 
-void Deko3dRenderer::renderVideo(AVFrame* frame)
+void Deko3dRenderer::presentFrame(AVFrame* frame)
+{
+    draw(frame);
+
+    if (!m_frame_bound || m_paused)
+        return;
+
+    VideoContext* videoContext = brls::Application::getPlatform()->getVideoContext();
+    videoContext->beginFrame();
+    renderVideo();
+    videoContext->endFrame();
+
+    recordPresentedFrame();
+}
+
+void Deko3dRenderer::recordPresentedFrame()
+{
+    auto now = std::chrono::steady_clock::now();
+    if (!m_render_fps_init)
+    {
+        m_render_fps_start = now;
+        m_render_frame_count = 0;
+        m_render_fps_init = true;
+    }
+
+    m_render_frame_count++;
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_render_fps_start).count();
+    if (elapsed >= 1000)
+    {
+        m_render_fps = (m_render_frame_count * 1000.0f) / elapsed;
+        m_render_frame_count = 0;
+        m_render_fps_start = now;
+    }
+}
+
+void Deko3dRenderer::renderVideo()
 {
     if (!m_initialized || !m_textures_initialized || !m_frame_bound || !m_current_frame)
         return;
@@ -801,7 +835,7 @@ void Deko3dRenderer::registerCallback()
 
         if (m_frame_bound && !m_paused)
         {
-            renderVideo(nullptr);
+            renderVideo();
         }
     });
 
@@ -1155,23 +1189,9 @@ void Deko3dRenderer::renderStatsOverlay()
         "Decoder: {} ({})\n",
         m_stats.video_width,
         m_stats.video_height,
-        m_stats.fps,
+        m_render_fps,
         m_stats.is_hevc ? "HEVC" : "H.264",
         m_stats.is_hardware_decoder ? "NVTEGRA" : "SW");
-
-    if (m_stats.low_latency_mode)
-    {
-        renderedSection += "Mode: Low Latency\n";
-    }
-    else
-    {
-        renderedSection += std::format(
-            "Dropped: {}  Faked: {}\n"
-            "Queue: {}\n",
-            m_stats.dropped_frames,
-            m_stats.faked_frames,
-            m_stats.queue_size);
-    }
 
     std::string statsText = std::format(
         "=== Requested ===\n"

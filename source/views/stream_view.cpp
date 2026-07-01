@@ -125,6 +125,7 @@ void StreamView::startStream()
         brls::Logger::info("Session already started by ConnectionView, activating stream...");
         sessionStarted = true;
         streamActive = true;
+        prepareVideoPipelineTick();
         brls::Application::blockInputs(true);
         brls::Logger::info("Stream activated successfully");
         return;
@@ -186,6 +187,7 @@ void StreamView::startStream()
 
         sessionStarted = true;
         streamActive = true;
+        prepareVideoPipelineTick();
 
         brls::Application::blockInputs(true);
 
@@ -221,6 +223,12 @@ void StreamView::stopStream()
     brls::Logger::info("Stopping stream");
 
     brls::Application::forceUnblockInputs();
+    brls::Application::setRenderSuspended(false);
+    brls::Application::setSuspendedRenderCallback(nullptr);
+    brls::Application::setLimitedFPS(0);
+    brls::Application::setSwapInterval(1);
+    brls::Application::setExclusiveRender(false);
+    videoPipelineActive = false;
 
     streamActive = false;
 
@@ -302,34 +310,58 @@ void StreamView::draw(NVGcontext* vg, float x, float y, float width, float heigh
         return;
     }
 
-    auto renderer = session->getVideoRenderer();
-    if (renderer)
+    activateVideoPipeline();
+}
+
+void StreamView::prepareVideoPipelineTick()
+{
+    auto weak = weak_from_this();
+    brls::Application::setSuspendedRenderCallback([weak]() {
+        if (auto self = weak.lock())
+            self->streamingTick();
+    });
+    brls::Application::setLimitedFPS(60);
+    brls::Application::setSwapInterval(0);
+    brls::Application::setExclusiveRender(true);
+}
+
+void StreamView::activateVideoPipeline()
+{
+    if (videoPipelineActive)
+        return;
+
+    prepareVideoPipelineTick();
+    brls::Application::setRenderSuspended(true);
+    videoPipelineActive = true;
+}
+
+void StreamView::streamingTick()
+{
+    checkMenuTrigger();
+    if (menuOpen)
     {
-        renderer->setTickCallback([this]() -> bool {
-            checkMenuTrigger();
-            if (menuOpen)
-            {
-                brls::Application::setExclusiveRender(false);
-                session->getVideoRenderer()->setTickCallback(nullptr);
-                return false;
-            }
+        brls::Application::setSwapInterval(1);
+        brls::Application::setExclusiveRender(false);
+        brls::Application::setRenderSuspended(false);
+        videoPipelineActive = false;
+        return;
+    }
 
-            host->sendFeedbackState();
+    host->sendFeedbackState();
 
-            if (!session->MainLoop())
-            {
-                brls::Application::setExclusiveRender(false);
-                session->getVideoRenderer()->setTickCallback(nullptr);
-                intentionalDisconnect = true;
-                brls::sync([this]() {
-                    stopStream();
-                    brls::Application::popActivity();
-                });
-                return false;
-            }
-            return true;
+    if (!session->MainLoop())
+    {
+        brls::Application::setSwapInterval(1);
+        brls::Application::setExclusiveRender(false);
+        brls::Application::setRenderSuspended(false);
+        brls::Application::setSuspendedRenderCallback(nullptr);
+        brls::Application::setLimitedFPS(0);
+        videoPipelineActive = false;
+        intentionalDisconnect = true;
+        brls::sync([this]() {
+            stopStream();
+            brls::Application::popActivity();
         });
-        brls::Application::setExclusiveRender(true);
     }
 }
 

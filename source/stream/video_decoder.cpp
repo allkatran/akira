@@ -52,8 +52,9 @@ bool VideoDecoder::initCodec(bool is_PS5, int width, int height)
         m_codec_context->skip_loop_filter = AVDISCARD_ALL;
         m_codec_context->flags |= AV_CODEC_FLAG_LOW_DELAY;
         m_codec_context->flags2 |= AV_CODEC_FLAG2_FAST;
-        m_codec_context->thread_type = FF_THREAD_FRAME;
+        m_codec_context->thread_type = FF_THREAD_SLICE;
         m_codec_context->thread_count = 1;
+        m_codec_context->has_b_frames = 0;
 #ifdef BOREALIS_USE_DEKO3D
         // Create HW device context BEFORE opening codec 
 	brls::Logger::info("VideoDecoder: Creating NVTegra hardware device context...");
@@ -102,9 +103,6 @@ bool VideoDecoder::initVideo(int video_width, int video_height)
     // PS5 may resume with P-frames; returning false triggers CORRUPTFRAME → keyframe request
     m_waiting_for_idr = true;
     brls::Logger::info("VideoDecoder: Waiting for IDR frame to start decoding");
-
-    size_t frame_queue_limit = SettingsManager::getInstance()->getLowLatencyMode() ? 1 : 3;
-    m_frame_queue.setLimit(frame_queue_limit);
 
     m_tmp_frame = av_frame_alloc();
     if (!m_tmp_frame)
@@ -166,7 +164,14 @@ bool VideoDecoder::decode(uint8_t* buf, size_t buf_size)
                 }
 
                 av_frame_move_ref(queued_frame, m_tmp_frame);
-                m_frame_queue.push(queued_frame);
+                if (m_frame_ready_callback)
+                {
+                    m_frame_ready_callback(queued_frame);
+                }
+                else
+                {
+                    av_frame_free(&queued_frame);
+                }
                 continue;
             }
 
@@ -278,8 +283,6 @@ bool VideoDecoder::scanNALUnits(uint8_t* buf, size_t buf_size)
 
 void VideoDecoder::cleanup()
 {
-    m_frame_queue.cleanup();
-
     if (m_tmp_frame)
     {
         av_frame_free(&m_tmp_frame);

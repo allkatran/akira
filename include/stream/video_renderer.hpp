@@ -24,12 +24,15 @@ public:
 
     virtual void draw(AVFrame* frame) = 0;
 
+    virtual void presentFrame(AVFrame* frame) { draw(frame); }
+
     virtual void cleanup() = 0;
 
     virtual void waitIdle() {}
 
     virtual void setShowStatsOverlay(bool show) { m_show_stats = show; }
     virtual void setStreamStats(const StreamStats& stats) { m_stats = stats; }
+    virtual float getRenderFPS() const { return 0.0f; }
     virtual void setPaused(bool paused) { (void)paused; }
     virtual void updateResolution(int width, int height) { (void)width; (void)height; }
     virtual void triggerBorderFlash() {}
