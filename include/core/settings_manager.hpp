@@ -17,12 +17,16 @@
 #include "profile.hpp"
 
 // Forward declaration
+#include "input/rumble_profile.hpp"
+
 class Host;
 
 enum class HapticPreset {
     Disabled = 0,
     Weak = 1,
-    Strong = 2
+    Strong = 2,
+
+    ConsoleRumble = 3
 };
 
 enum class GyroSource {
@@ -63,10 +67,16 @@ private:
     int64_t nextProfileId = 1;
     int64_t nextConsoleId = 1;
     HapticPreset globalHaptic = HapticPreset::Disabled;
+    bool  directRumbleInStream  = false;
+    bool  directHapticsInStream = false;
+
+
     float rumbleFreqLow = 140.0f;
     float rumbleFreqHigh = 185.0f;
     float rumbleEnvelopeDecay = 0.85f;
     float rumbleEnvelopeAttack = 0.60f;
+
+    std::map<std::string, akira::input::RumbleProfile> rumbleProfiles;
     int localVideoBitrate = 10000;
     int remoteVideoBitrate = 10000;
     int vpnVideoBitrate = 5000;
@@ -342,14 +352,28 @@ public:
     void setHaptic(Host* host, HapticPreset value);
     void setHaptic(Host* host, const std::string& value);
 
-    float getRumbleFreqLow() const;
-    void setRumbleFreqLow(float value);
-    float getRumbleFreqHigh() const;
-    void setRumbleFreqHigh(float value);
-    float getRumbleEnvelopeDecay() const;
-    void setRumbleEnvelopeDecay(float value);
-    float getRumbleEnvelopeAttack() const;
-    void setRumbleEnvelopeAttack(float value);
+    bool getDirectRumbleInStream() const;
+    void setDirectRumbleInStream(bool value);
+    bool getDirectHapticsInStream() const;
+    void setDirectHapticsInStream(bool value);
+
+
+    akira::input::RumbleProfile resolveRumbleProfile(uint16_t vendorId, uint16_t productId,
+                                                     const uint8_t* address,
+                                                     bool switchNative, bool joycon) const;
+
+    std::string resolveRumbleKey(uint16_t vendorId, uint16_t productId,
+                                 const uint8_t* address, bool switchNative,
+                                 bool joycon) const;
+
+    akira::input::RumbleProfile getRumbleProfile(const std::string& key) const;
+    void setRumbleProfile(const std::string& key, const akira::input::RumbleProfile& profile);
+    bool hasRumbleProfile(const std::string& key) const;
+
+    bool seedRumbleProfile(const std::string& key,
+                           const akira::input::RumbleProfile* inheritFrom = nullptr);
+
+    void resetRumbleProfile(const std::string& key);
 
     ChiakiTarget getChiakiTarget(Host* host);
     bool setChiakiTarget(Host* host, ChiakiTarget target);

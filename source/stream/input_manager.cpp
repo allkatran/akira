@@ -2,6 +2,7 @@
 #include "stream/session.hpp"
 #include "core/settings_manager.hpp"
 #include "core/swipe_direction.hpp"
+#include "input/ps_output.hpp"
 #include <borealis.hpp>
 #include <chiaki/controller.h>
 #include <cmath>
@@ -19,6 +20,12 @@ InputManager::~InputManager()
 
 bool InputManager::init()
 {
+    bool vibration_permitted = true;
+    if (R_SUCCEEDED(hidIsVibrationPermitted(&vibration_permitted)) && !vibration_permitted) {
+        brls::Logger::warning("Controller Vibration is off in System Settings - "
+                              "nothing sent through HOS will be felt");
+    }
+
     for (int i = 0; i < SDL_JOYSTICK_COUNT; i++)
     {
         m_sdl_joystick_ptr[i] = SDL_JoystickOpen(i);
@@ -29,23 +36,20 @@ bool InputManager::init()
         }
     }
 
-    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
-    padInitializeDefault(&m_pad);
+    padConfigureInput(8, HidNpadStyleSet_NpadStandard);
     hidInitializeTouchScreen();
 
-    hidGetSixAxisSensorHandles(&m_sixaxis_handles[0], 1, HidNpadIdType_Handheld, HidNpadStyleTag_NpadHandheld);
-    hidGetSixAxisSensorHandles(&m_sixaxis_handles[1], 1, HidNpadIdType_No1, HidNpadStyleTag_NpadFullKey);
-    hidGetSixAxisSensorHandles(&m_sixaxis_handles[2], 2, HidNpadIdType_No1, HidNpadStyleTag_NpadJoyDual);
-    hidStartSixAxisSensor(m_sixaxis_handles[0]);
-    hidStartSixAxisSensor(m_sixaxis_handles[1]);
-    hidStartSixAxisSensor(m_sixaxis_handles[2]);
-    hidStartSixAxisSensor(m_sixaxis_handles[3]);
+    m_path = akira::input::DefaultPadPath(m_extended);
+
+    m_extended.initializeOptional();
 
     return true;
 }
 
 void InputManager::cleanup()
 {
+    m_extended.shutdown();
+
     for (int i = 0; i < SDL_JOYSTICK_COUNT; i++)
     {
         if (m_sdl_joystick_ptr[i])
@@ -55,25 +59,155 @@ void InputManager::cleanup()
         }
     }
 
-    hidStopSixAxisSensor(m_sixaxis_handles[0]);
-    hidStopSixAxisSensor(m_sixaxis_handles[1]);
-    hidStopSixAxisSensor(m_sixaxis_handles[2]);
-    hidStopSixAxisSensor(m_sixaxis_handles[3]);
+    m_path.reset();
+}
+
+void InputManager::setPath(std::unique_ptr<akira::input::PadPath> path)
+{
+    if (!path)
+        return;
+
+    if (m_path)
+        m_path->sendRumble(0.0f, 0.0f, 0.0f, 0.0f);
+    m_path = std::move(path);
+
+    brls::Logger::info("InputManager: input path is now {}", m_path->label());
+}
+
+std::vector<akira::input::PadDescription> InputManager::describePads()
+{
+    return akira::input::DescribePads(m_extended);
+}
+
+void InputManager::selectNpad(HidNpadIdType npad)
+{
+    for (const auto& desc : describePads()) {
+        if (desc.npad != npad)
+            continue;
+
+        auto path = akira::input::MakePath(desc, m_extended);
+        if (!path)
+            break;
+
+        m_bound_npad = npad;
+
+        brls::Logger::info("InputManager: using {} on npad {}", path->label(), (int)npad);
+        setPath(std::move(path));
+        return;
+    }
+
+    brls::Logger::warning("InputManager: npad {} no longer present, falling back to default", (int)npad);
+    setPath(akira::input::DefaultPadPath(m_extended));
+}
+
+void InputManager::retryPathIdentification()
+{
+    if (m_identify_done)
+        return;
+
+    const uint32_t now = (uint32_t)(armTicksToNs(armGetSystemTick()) / 1000000ull);
+
+    if (m_identify_until == 0) {
+        m_identify_until = now + 10000;
+        m_identify_next  = now;
+    }
+
+    if (akira::input::PadTakesDirectOutput(m_path->vendorId(), m_path->productId())) {
+        m_identify_done = true;
+        return;
+    }
+
+    if (now > m_identify_until) {
+        m_identify_done = true;
+        return;
+    }
+
+    if (now < m_identify_next)
+        return;
+    m_identify_next = now + 1000;
+
+    for (const auto& desc : describePads()) {
+        if (desc.kind != akira::input::PadPathKind::McPsNative)
+            continue;
+        if (m_bound_npad != kNoNpad && desc.npad != m_bound_npad)
+            continue;
+
+        auto path = akira::input::MakePath(desc, m_extended);
+        if (!path)
+            continue;
+
+        brls::Logger::info("InputManager: {} identified on npad {} after the path was chosen"
+                           " - upgrading from {}",
+                           path->label(), (int)desc.npad, m_path->label());
+
+        m_bound_npad    = desc.npad;
+        m_identify_done = true;
+        setPath(std::move(path));
+        return;
+    }
+}
+
+void InputManager::reconcilePathDriver()
+{
+    if (m_bound_npad == kNoNpad)
+        return;
+
+    const uint32_t now = (uint32_t)(armTicksToNs(armGetSystemTick()) / 1000000ull);
+    if (now < m_driver_next)
+        return;
+    m_driver_next = now + 1000;
+
+    for (const auto& desc : describePads()) {
+        if (desc.npad != m_bound_npad)
+            continue;
+
+        const akira::input::PadDriver driver =
+            akira::input::ResolvePadDriver(desc, m_extended);
+        const bool native_now = m_path->nativeRumble();
+
+        if ((driver == akira::input::PadDriver::Akira) == native_now)
+            return;
+
+        auto path = akira::input::MakePath(desc, m_extended);
+        if (!path)
+            return;
+
+        brls::Logger::info("InputManager: pad on npad {} is now driven by {}"
+                           " - {} to {}",
+                           (int)desc.npad, akira::input::PadDriverName(driver),
+                           m_path->label(), path->label());
+        setPath(std::move(path));
+        return;
+    }
 }
 
 void InputManager::update(ChiakiControllerState* state, std::map<uint32_t, int8_t>* finger_id_touch_id)
 {
-    padUpdate(&m_pad);
+    if (!m_path)
+    {
+        chiaki_controller_state_set_idle(state);
+        return;
+    }
 
-    u64 buttons = padGetButtons(&m_pad);
+    retryPathIdentification();
+    reconcilePathDriver();
+
+    m_path->poll();
 
     state->buttons = 0;
     state->l2_state = 0x00;
     state->r2_state = 0x00;
 
-    const ButtonMapping& mapping = SettingsManager::getInstance()->getButtonMapping();
+    const bool mapped = m_path->usesButtonMapping();
 
+    u64 buttons = mapped ? m_path->heldButtons() : 0;
     u64 consumedButtons = 0;
+
+    if (!mapped) {
+        m_path->readButtons(state);
+        m_path->readTriggers(state);
+    } else {
+    const ButtonMapping& mapping = SettingsManager::getInstance()->getButtonMapping();
     for (const auto& [chiakiBtn, combo] : mapping) {
         if (combo.size() <= 1) continue;
         if (!SettingsManager::getInstance()->isButtonEnabled(chiakiBtn))
@@ -134,9 +268,11 @@ void InputManager::update(ChiakiControllerState* state, std::map<uint32_t, int8_
         }
     }
 
+    m_path->readTriggers(state);
+    }
 
-    HidAnalogStickState left = padGetStickPos(&m_pad, 0);
-    HidAnalogStickState right = padGetStickPos(&m_pad, 1);
+    HidAnalogStickState left = m_path->stickPos(0);
+    HidAnalogStickState right = m_path->stickPos(1);
 
     static constexpr u64 leftStickDirs = HidNpadButton_StickLUp | HidNpadButton_StickLDown
                                        | HidNpadButton_StickLLeft | HidNpadButton_StickLRight;
@@ -159,23 +295,26 @@ void InputManager::update(ChiakiControllerState* state, std::map<uint32_t, int8_
         state->right_y = -right.y;
     }
 
-    readTouchScreen(state, finger_id_touch_id);
-    updateSyntheticSwipes(state, buttons);
-
-    if (m_touchpad_button_hold < 0)
+    if (!m_path->readTouchpad(state))
     {
-        m_touchpad_button_hold++;
+        readTouchScreen(state, finger_id_touch_id);
+        updateSyntheticSwipes(state, buttons);
+
+        if (m_touchpad_button_hold < 0)
+        {
+            m_touchpad_button_hold++;
+            if (m_touchpad_button_hold == 0)
+                m_touchpad_button_hold = PendingBorderTap::TAP_BUTTON_HOLD_FRAMES;
+        }
+        else if (m_touchpad_button_hold > 0)
+        {
+            state->buttons |= CHIAKI_CONTROLLER_BUTTON_TOUCHPAD;
+            m_touchpad_button_hold--;
+        }
+
         if (m_touchpad_button_hold == 0)
-            m_touchpad_button_hold = PendingBorderTap::TAP_BUTTON_HOLD_FRAMES;
+            fireDeferredRelease(state);
     }
-    else if (m_touchpad_button_hold > 0)
-    {
-        state->buttons |= CHIAKI_CONTROLLER_BUTTON_TOUCHPAD;
-        m_touchpad_button_hold--;
-    }
-
-    if (m_touchpad_button_hold == 0)
-        fireDeferredRelease(state);
 
     if (++m_sixaxis_frame_counter >= 3) {
         m_sixaxis_frame_counter = 0;
@@ -372,48 +511,7 @@ bool InputManager::readTouchScreen(ChiakiControllerState* chiaki_state, std::map
 bool InputManager::readSixAxis(ChiakiControllerState* state)
 {
     HidSixAxisSensorState sixaxis = {0};
-    uint64_t style_set = padGetStyleSet(&m_pad);
-
-    if (style_set & HidNpadStyleTag_NpadHandheld)
-    {
-        hidGetSixAxisSensorStates(m_sixaxis_handles[0], &sixaxis, 1);
-    }
-    else if (style_set & HidNpadStyleTag_NpadFullKey)
-    {
-        hidGetSixAxisSensorStates(m_sixaxis_handles[1], &sixaxis, 1);
-    }
-    else if (style_set & HidNpadStyleTag_NpadJoyDual)
-    {
-        u64 attrib = padGetAttributes(&m_pad);
-        GyroSource gyroSource = SettingsManager::getInstance()->getGyroSource();
-
-        bool leftConnected = attrib & HidNpadAttribute_IsLeftConnected;
-        bool rightConnected = attrib & HidNpadAttribute_IsRightConnected;
-
-        bool useLeft = false;
-        bool useRight = false;
-
-        switch (gyroSource) {
-            case GyroSource::Left:
-                useLeft = leftConnected;
-                break;
-            case GyroSource::Right:
-                useRight = rightConnected;
-                break;
-            case GyroSource::Auto:
-            default:
-                if (leftConnected)
-                    useLeft = true;
-                else if (rightConnected)
-                    useRight = true;
-                break;
-        }
-
-        if (useLeft)
-            hidGetSixAxisSensorStates(m_sixaxis_handles[2], &sixaxis, 1);
-        else if (useRight)
-            hidGetSixAxisSensorStates(m_sixaxis_handles[3], &sixaxis, 1);
-    }
+    m_path->readGyro(&sixaxis);
 
     state->gyro_x = sixaxis.angular_velocity.x * 2.0f * M_PI;
     state->gyro_y = sixaxis.angular_velocity.z * 2.0f * M_PI;
@@ -472,13 +570,14 @@ bool InputManager::readSixAxis(ChiakiControllerState* state)
 
 void InputManager::resetMotionControls()
 {
+    if (!m_path)
+        return;
+
     m_accel_zero_x = m_raw_accel_x;
     m_accel_zero_y = m_raw_accel_y - 1.0f;
     m_accel_zero_z = m_raw_accel_z;
 
-    for (int i = 0; i < 4; i++) {
-        hidResetSixAxisSensorFusionParameters(m_sixaxis_handles[i]);
-    }
+    m_path->resetMotion();
 
     brls::Logger::info("Motion controls reset: zero offset = ({}, {}, {})",
         m_accel_zero_x, m_accel_zero_y, m_accel_zero_z);
@@ -510,8 +609,8 @@ void InputManager::updateSyntheticSwipes(ChiakiControllerState* state, u64 butto
 
     const ButtonMapping& mapping = SettingsManager::getInstance()->getButtonMapping();
 
-    HidAnalogStickState leftStick = padGetStickPos(&m_pad, 0);
-    HidAnalogStickState rightStick = padGetStickPos(&m_pad, 1);
+    HidAnalogStickState leftStick = m_path->stickPos(0);
+    HidAnalogStickState rightStick = m_path->stickPos(1);
 
     static const char* swipeNames[4] = { "UP", "DOWN", "LEFT", "RIGHT" };
 

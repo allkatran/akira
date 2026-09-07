@@ -9,6 +9,8 @@
 #include "stream/deko3d_renderer.hpp"
 #include "stream/ipc_service.hpp"
 
+#include <cstring>
+
 #include <chiaki/packetstats.h>
 
 Session* Session::GetInstance()
@@ -55,6 +57,18 @@ void Session::setEnvelopeAttack(float attack)
         m_haptic_manager->setEnvelopeAttack(attack);
 }
 
+void Session::setRumbleCeiling(float ceiling)
+{
+    if (m_haptic_manager)
+        m_haptic_manager->setRumbleCeiling(ceiling);
+}
+
+void Session::setRumbleSource(akira::input::RumbleSource source)
+{
+    if (m_haptic_manager)
+        m_haptic_manager->setRumbleSource(source);
+}
+
 void Session::SetLogger(ChiakiLog* log)
 {
     this->log = log;
@@ -71,6 +85,10 @@ Session::Session()
     m_audio_manager = std::make_unique<AudioManager>();
     m_haptic_manager = std::make_unique<HapticManager>();
     m_input_manager = std::make_unique<InputManager>();
+
+    m_haptic_manager->setInputManager(m_input_manager.get());
+
+    m_haptic_manager->setExtendedInput(&m_input_manager->extendedInput());
     m_video_decoder = std::make_unique<VideoDecoder>();
 }
 
@@ -178,6 +196,53 @@ void Session::SetRumble(uint8_t left, uint8_t right)
     {
         m_haptic_manager->setRumble(left, right);
     }
+}
+
+void Session::SetTriggerEffects(const ChiakiTriggerEffectsEvent* effects)
+{
+    if (effects == nullptr || !m_input_manager)
+        return;
+
+    if (akira::input::Ds5IntensityFromWire(m_trigger_intensity)
+        == akira::input::Ds5EffectIntensity::Off)
+        return;
+
+    auto* path = m_input_manager->path();
+    if (!path)
+        return;
+
+    akira::input::PadPath::TriggerEffect left;
+    akira::input::PadPath::TriggerEffect right;
+
+    left.type = effects->type_left;
+    std::memcpy(left.params, effects->left, sizeof(left.params));
+    right.type = effects->type_right;
+    std::memcpy(right.params, effects->right, sizeof(right.params));
+
+    path->sendTriggerEffects(left, right);
+}
+
+void Session::SetEffectIntensity(uint8_t vibration, uint8_t trigger)
+{
+    m_trigger_intensity = trigger;
+
+    if (!m_input_manager)
+        return;
+
+    if (auto* path = m_input_manager->path())
+        path->sendEffectIntensity(vibration, trigger);
+
+    if (m_haptic_manager)
+        m_haptic_manager->setConsoleVibration(vibration);
+}
+
+void Session::SetLedColor(uint8_t red, uint8_t green, uint8_t blue)
+{
+    if (!m_input_manager)
+        return;
+
+    if (auto* path = m_input_manager->path())
+        path->sendLightbar(red, green, blue);
 }
 
 void Session::HapticCB(uint8_t* buf, size_t buf_size)
@@ -291,6 +356,13 @@ StreamStats Session::getStreamStats()
     stats.requested_fps = m_requested_fps;
     stats.requested_bitrate = m_requested_bitrate;
     stats.requested_hevc = m_requested_hevc;
+    
+    if (m_input_manager) {
+        auto& extended = m_input_manager->extendedInput();
+        stats.analog_triggers_active = extended.hasFreshAnalogState();
+        stats.analog_l2 = extended.l2();
+        stats.analog_r2 = extended.r2();
+    }
 
     if (m_video_renderer)
         stats.fps = m_video_renderer->getRenderFPS();

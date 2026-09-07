@@ -36,6 +36,10 @@ struct StreamStats
     size_t frames_recovered = 0;
 
     uint64_t stream_duration_seconds = 0;
+
+    bool analog_triggers_active = false;
+    uint8_t analog_l2 = 0;
+    uint8_t analog_r2 = 0;
 };
 
 #endif // AKIRA_IO_STREAM_STATS_HPP

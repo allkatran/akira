@@ -22,6 +22,15 @@
 
 namespace {
 
+akira::input::RumbleSource sourceFromLegacyPreset(HapticPreset preset)
+{
+    switch (preset) {
+        case HapticPreset::Disabled:      return akira::input::RumbleSource::Off;
+        case HapticPreset::ConsoleRumble: return akira::input::RumbleSource::Game;
+        default:                          return akira::input::RumbleSource::Derived;
+    }
+}
+
 int fsrTargetHeightForResolution(ChiakiVideoResolutionPreset resolution) {
     switch (resolution) {
         case CHIAKI_VIDEO_RESOLUTION_PRESET_540p:
@@ -457,10 +466,74 @@ void SettingsManager::parseTomlFile() {
 
         if (auto val = config["input"]["haptic"].value<int64_t>())
             globalHaptic = static_cast<HapticPreset>(*val);
+        if (auto val = config["input"]["direct_rumble_in_stream"].value<bool>())
+            directRumbleInStream = *val;
+        if (auto val = config["input"]["direct_haptics_in_stream"].value<bool>())
+            directHapticsInStream = *val;
         if (auto val = config["input"]["gyro_source"].value<int64_t>())
             globalGyroSource = static_cast<GyroSource>(*val);
 
         if (auto rumbleTable = config["input"]["rumble"].as_table()) {
+            for (const auto& [key, node] : *rumbleTable) {
+                const auto* entry = node.as_table();
+                if (entry == nullptr)
+                    continue;
+
+                std::string name(key.str());
+                akira::input::RumbleProfile profile =
+                    (name == akira::input::kRumbleKeySwitch)
+                        ? akira::input::SwitchRumbleProfile()
+                        : akira::input::DefaultRumbleProfile();
+
+                if (auto v = (*entry)["strength"].value<double>())
+                    profile.strength = std::max(0.0f, std::min(1.0f, static_cast<float>(*v)));
+                if (auto v = (*entry)["ceiling"].value<double>())
+                    profile.ceiling = std::max(0.0f, std::min(1.0f, static_cast<float>(*v)));
+                if (auto v = (*entry)["per_motor"].value<bool>())
+                    profile.per_motor = *v;
+                if (auto v = (*entry)["freq_low"].value<double>())
+                    profile.freq_low = std::max(40.0f, std::min(320.0f, static_cast<float>(*v)));
+                if (auto v = (*entry)["freq_high"].value<double>())
+                    profile.freq_high = std::max(40.0f, std::min(320.0f, static_cast<float>(*v)));
+                if (auto v = (*entry)["envelope_attack"].value<double>())
+                    profile.envelope_attack = std::max(0.20f, std::min(1.00f, static_cast<float>(*v)));
+                if (auto v = (*entry)["envelope_decay"].value<double>())
+                    profile.envelope_decay = std::max(0.50f, std::min(0.95f, static_cast<float>(*v)));
+                if (auto v = (*entry)["haptic_intensity"].value<int64_t>()) {
+                    const int64_t clamped = std::max<int64_t>(0, std::min<int64_t>(5, *v));
+                    profile.haptic_intensity = static_cast<akira::input::HapticIntensity>(clamped);
+                }
+                if (auto v = (*entry)["direct_output"].value<bool>())
+                    profile.output_mode = *v ? akira::input::PadOutputMode::Native
+                                             : akira::input::PadOutputMode::Basic;
+                if (auto v = (*entry)["output_mode"].value<int64_t>())
+                    profile.output_mode = (*v == 1) ? akira::input::PadOutputMode::Basic
+                                                    : akira::input::PadOutputMode::Native;
+
+                if (auto v = (*entry)["lightbar_enabled"].value<bool>())
+                    profile.lightbar_enabled = *v;
+                if (auto v = (*entry)["lightbar_r"].value<int64_t>())
+                    profile.lightbar_r = (std::uint8_t)std::clamp<int64_t>(*v, 0, 255);
+                if (auto v = (*entry)["lightbar_g"].value<int64_t>())
+                    profile.lightbar_g = (std::uint8_t)std::clamp<int64_t>(*v, 0, 255);
+                if (auto v = (*entry)["lightbar_b"].value<int64_t>())
+                    profile.lightbar_b = (std::uint8_t)std::clamp<int64_t>(*v, 0, 255);
+
+                auto source = (*entry)["rumble_source"].value<int64_t>();
+                if (!source)
+                    source = (*entry)["console_feedback"].value<int64_t>();
+                if (source) {
+                    const int64_t clamped = std::max<int64_t>(0, std::min<int64_t>(2, *source));
+                    profile.rumble_source = static_cast<akira::input::RumbleSource>(clamped);
+                } else {
+                    profile.rumble_source = sourceFromLegacyPreset(globalHaptic);
+                    if (globalHaptic == HapticPreset::Weak)
+                        profile.haptic_intensity = akira::input::HapticIntensity::Weak;
+                }
+
+                rumbleProfiles[name] = profile;
+            }
+
             if (auto val = (*rumbleTable)["freq_low"].value<double>())
                 rumbleFreqLow = std::max(40.0f, std::min(320.0f, static_cast<float>(*val)));
             if (auto val = (*rumbleTable)["freq_high"].value<double>())
@@ -470,6 +543,42 @@ void SettingsManager::parseTomlFile() {
             if (auto val = (*rumbleTable)["envelope_attack"].value<double>())
                 rumbleEnvelopeAttack = std::max(0.20f, std::min(1.00f, static_cast<float>(*val)));
         }
+
+        if (rumbleProfiles.find(akira::input::kRumbleKeySwitch) == rumbleProfiles.end()) {
+            akira::input::RumbleProfile migrated = akira::input::SwitchRumbleProfile();
+            migrated.freq_low        = rumbleFreqLow;
+            migrated.freq_high       = rumbleFreqHigh;
+            migrated.envelope_attack = rumbleEnvelopeAttack;
+            migrated.envelope_decay  = rumbleEnvelopeDecay;
+
+            rumbleProfiles[akira::input::kRumbleKeySwitch] = migrated;
+            brls::Logger::info("rumble profiles: migrated existing settings into the switch profile");
+        }
+
+        {
+            const auto old_switch = rumbleProfiles.find(akira::input::kRumbleKeySwitch);
+            const akira::input::RumbleProfile inherited =
+                old_switch != rumbleProfiles.end() ? old_switch->second
+                                                   : akira::input::SwitchRumbleProfile();
+
+            for (const char* key : { akira::input::kRumbleKeyJoyCon,
+                                     akira::input::kRumbleKeySwitchPro }) {
+                if (rumbleProfiles.find(key) == rumbleProfiles.end())
+                    rumbleProfiles[key] = inherited;
+            }
+        }
+
+        if (rumbleProfiles.find(akira::input::kRumbleKeyDualSense) == rumbleProfiles.end()) {
+            akira::input::RumbleProfile ds = akira::input::DefaultRumbleProfile();
+
+            ds.output_mode    = akira::input::PadOutputMode::Native;
+            ds.rumble_source  = sourceFromLegacyPreset(globalHaptic);
+            rumbleProfiles[akira::input::kRumbleKeyDualSense] = ds;
+        }
+        if (rumbleProfiles.find(akira::input::kRumbleKeyGeneric) == rumbleProfiles.end())
+            rumbleProfiles[akira::input::kRumbleKeyGeneric] = akira::input::DefaultRumbleProfile();
+        if (rumbleProfiles.find(akira::input::kRumbleKeyDefault) == rumbleProfiles.end())
+            rumbleProfiles[akira::input::kRumbleKeyDefault] = akira::input::DefaultRumbleProfile();
 
         cloudDatacenterPscloud = config["cloud"]["datacenter_pscloud"].value<std::string>().value_or("");
         cloudDatacenterPsnow = config["cloud"]["datacenter_psnow"].value<std::string>().value_or("");
@@ -1028,10 +1137,32 @@ int SettingsManager::writeFile() {
         input.insert("gyro_source", std::to_underlying(globalGyroSource));
 
         toml::table rumble;
-        rumble.insert("freq_low", static_cast<double>(rumbleFreqLow));
-        rumble.insert("freq_high", static_cast<double>(rumbleFreqHigh));
-        rumble.insert("envelope_decay", static_cast<double>(rumbleEnvelopeDecay));
-        rumble.insert("envelope_attack", static_cast<double>(rumbleEnvelopeAttack));
+        for (const auto& [key, profile] : rumbleProfiles) {
+            toml::table entry;
+            entry.insert("strength", static_cast<double>(profile.strength));
+            entry.insert("ceiling", static_cast<double>(profile.ceiling));
+            entry.insert("per_motor", profile.per_motor);
+
+            if (!profile.per_motor) {
+                entry.insert("freq_low", static_cast<double>(profile.freq_low));
+                entry.insert("freq_high", static_cast<double>(profile.freq_high));
+                entry.insert("envelope_attack", static_cast<double>(profile.envelope_attack));
+                entry.insert("envelope_decay", static_cast<double>(profile.envelope_decay));
+            }
+
+            entry.insert("haptic_intensity",
+                         static_cast<int64_t>(std::to_underlying(profile.haptic_intensity)));
+            entry.insert("output_mode",
+                         static_cast<int64_t>(std::to_underlying(profile.output_mode)));
+            entry.insert("lightbar_enabled", profile.lightbar_enabled);
+            entry.insert("lightbar_r", (int64_t)profile.lightbar_r);
+            entry.insert("lightbar_g", (int64_t)profile.lightbar_g);
+            entry.insert("lightbar_b", (int64_t)profile.lightbar_b);
+            entry.insert("rumble_source",
+                         static_cast<int64_t>(std::to_underlying(profile.rumble_source)));
+
+            rumble.insert(key, std::move(entry));
+        }
         input.insert("rumble", std::move(rumble));
 
         toml::table mapping;
@@ -1607,14 +1738,96 @@ void SettingsManager::setHaptic(Host* host, const std::string& value) {
     setHaptic(host, preset);
 }
 
-float SettingsManager::getRumbleFreqLow() const { return rumbleFreqLow; }
-void SettingsManager::setRumbleFreqLow(float value) { rumbleFreqLow = std::max(40.0f, std::min(320.0f, value)); }
-float SettingsManager::getRumbleFreqHigh() const { return rumbleFreqHigh; }
-void SettingsManager::setRumbleFreqHigh(float value) { rumbleFreqHigh = std::max(40.0f, std::min(320.0f, value)); }
-float SettingsManager::getRumbleEnvelopeDecay() const { return rumbleEnvelopeDecay; }
-void SettingsManager::setRumbleEnvelopeDecay(float value) { rumbleEnvelopeDecay = std::max(0.50f, std::min(0.95f, value)); }
-float SettingsManager::getRumbleEnvelopeAttack() const { return rumbleEnvelopeAttack; }
-void SettingsManager::setRumbleEnvelopeAttack(float value) { rumbleEnvelopeAttack = std::max(0.20f, std::min(1.00f, value)); }
+std::string SettingsManager::resolveRumbleKey(uint16_t vendorId, uint16_t productId,
+                                              const uint8_t* address, bool switchNative,
+                                              bool joycon) const
+{
+
+    if (address != nullptr) {
+        const std::string unit = akira::input::RumbleKeyForUnit(address);
+        if (rumbleProfiles.find(unit) != rumbleProfiles.end())
+            return unit;
+    }
+
+    if (vendorId != 0 || productId != 0) {
+        const std::string model = akira::input::RumbleKeyForModel(vendorId, productId);
+        if (rumbleProfiles.find(model) != rumbleProfiles.end())
+            return model;
+    }
+
+    const std::string category =
+        akira::input::RumbleKeyForCategory(
+            akira::input::PadCategoryFor(vendorId, productId, switchNative, joycon));
+    if (rumbleProfiles.find(category) != rumbleProfiles.end())
+        return category;
+
+    return akira::input::kRumbleKeyDefault;
+}
+
+akira::input::RumbleProfile SettingsManager::resolveRumbleProfile(uint16_t vendorId, uint16_t productId,
+                                                                  const uint8_t* address,
+                                                                  bool switchNative,
+                                                                  bool joycon) const
+{
+    return getRumbleProfile(resolveRumbleKey(vendorId, productId, address, switchNative, joycon));
+}
+
+akira::input::RumbleProfile SettingsManager::getRumbleProfile(const std::string& key) const
+{
+    const auto it = rumbleProfiles.find(key);
+    if (it != rumbleProfiles.end())
+        return it->second;
+
+    return key == akira::input::kRumbleKeySwitch
+               ? akira::input::SwitchRumbleProfile()
+               : akira::input::DefaultRumbleProfile();
+}
+
+bool SettingsManager::hasRumbleProfile(const std::string& key) const
+{
+    return rumbleProfiles.find(key) != rumbleProfiles.end();
+}
+
+void SettingsManager::setRumbleProfile(const std::string& key, const akira::input::RumbleProfile& profile)
+{
+    if (key.empty())
+        return;
+
+    rumbleProfiles[key] = profile;
+}
+
+bool SettingsManager::seedRumbleProfile(const std::string& key,
+                                        const akira::input::RumbleProfile* inheritFrom)
+{
+    if (key.empty() || hasRumbleProfile(key))
+        return false;
+
+    if (inheritFrom != nullptr) {
+        rumbleProfiles[key] = *inheritFrom;
+        return true;
+    }
+
+    rumbleProfiles[key] = key == akira::input::kRumbleKeySwitch
+                              ? akira::input::SwitchRumbleProfile()
+                              : akira::input::DefaultRumbleProfile();
+    return true;
+}
+
+void SettingsManager::resetRumbleProfile(const std::string& key)
+{
+    if (key.empty())
+        return;
+
+    rumbleProfiles[key] = key == akira::input::kRumbleKeySwitch
+                              ? akira::input::SwitchRumbleProfile()
+                              : akira::input::DefaultRumbleProfile();
+}
+
+bool SettingsManager::getDirectRumbleInStream() const { return directRumbleInStream; }
+void SettingsManager::setDirectRumbleInStream(bool value) { directRumbleInStream = value; }
+bool SettingsManager::getDirectHapticsInStream() const { return directHapticsInStream; }
+void SettingsManager::setDirectHapticsInStream(bool value) { directHapticsInStream = value; }
+
 
 ChiakiTarget SettingsManager::getChiakiTarget(Host* host) {
     if (host) return host->getChiakiTarget();

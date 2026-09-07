@@ -8,6 +8,12 @@
 #include <chiaki/log.h>
 #include <switch.h>
 
+#include "input/extended_input_manager.hpp"
+#include "input/pad_path.hpp"
+
+#include <memory>
+#include <vector>
+
 #define SDL_JOYSTICK_COUNT 2
 
 // Trackpad and touchscreen dimensions for coordinate mapping
@@ -53,9 +59,20 @@ public:
     void cleanup();
     void update(ChiakiControllerState* state, std::map<uint32_t, int8_t>* finger_id_touch_id);
 
-    PadState* getPad() { return &m_pad; }
+    void setPath(std::unique_ptr<akira::input::PadPath> path);
+    akira::input::PadPath* path() { return m_path.get(); }
+
+    void selectNpad(HidNpadIdType npad);
+
+    std::vector<akira::input::PadDescription> describePads();
+
+    ExtendedInputManager& extendedInput() { return m_extended; }
 
 private:
+    void retryPathIdentification();
+
+    void reconcilePathDriver();
+
     bool readTouchScreen(ChiakiControllerState* state, std::map<uint32_t, int8_t>* finger_id_touch_id);
     bool readSixAxis(ChiakiControllerState* state);
     void updateSyntheticSwipes(ChiakiControllerState* state, u64 buttons);
@@ -64,9 +81,19 @@ private:
     ChiakiLog* m_log = nullptr;
     SDL_Joystick* m_sdl_joystick_ptr[SDL_JOYSTICK_COUNT] = {nullptr};
 
-    PadState m_pad;
-    HidSixAxisSensorHandle m_sixaxis_handles[4];
+    ExtendedInputManager m_extended;
+
+    std::unique_ptr<akira::input::PadPath> m_path;
+
+    static constexpr HidNpadIdType kNoNpad = (HidNpadIdType)0xff;
+    HidNpadIdType m_bound_npad     = kNoNpad;
+    bool          m_identify_done  = false;
+    uint32_t      m_identify_next  = 0;
+    uint32_t      m_identify_until = 0;
+    uint32_t      m_driver_next    = 0;
     int m_sixaxis_frame_counter = 0;
+
+
 
     SyntheticSwipe m_swipes[4];
 

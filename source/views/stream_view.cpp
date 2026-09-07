@@ -1,4 +1,7 @@
 #include "views/stream_view.hpp"
+#include "views/controller_picker_view.hpp"
+#include "input/extended_input_manager.hpp"
+#include "input/pad_path.hpp"
 #include "views/stream_menu.hpp"
 #include "ui/theme.hpp"
 #include "views/connection_stage.hpp"
@@ -64,6 +67,24 @@ void StreamView::setupCallbacks()
 
     session->getInputManager()->setTargetPS5(host->isPS5());
 
+    host->setOnTriggerEffects([weak](const ChiakiTriggerEffectsEvent* effects) {
+        if (auto self = weak.lock()) {
+            self->session->SetTriggerEffects(effects);
+        }
+    });
+
+    host->setOnEffectIntensity([weak](uint8_t haptics, uint8_t triggers) {
+        if (auto self = weak.lock()) {
+            self->session->SetEffectIntensity(haptics, triggers);
+        }
+    });
+
+    host->setOnLedColor([weak](uint8_t red, uint8_t green, uint8_t blue) {
+        if (auto self = weak.lock()) {
+            self->session->SetLedColor(red, green, blue);
+        }
+    });
+
     host->setOnMotionReset([weak]() {
         if (auto self = weak.lock()) {
             if (self->session->getInputManager()) {
@@ -119,9 +140,168 @@ brls::View* StreamView::create()
     return nullptr;
 }
 
+bool StreamView::beginPadChoice()
+{
+    if (padChoiceDone)
+        return false;
+
+    if (session == nullptr) {
+        padChoiceDone = true;
+        return false;
+    }
+
+    if (!controllerReady) {
+        if (!session->InitController()) {
+            padChoiceDone = true;
+            return false;
+        }
+        controllerReady = true;
+    }
+
+    waitForPads(0);
+    return true;
+}
+
+void StreamView::waitForPads(int attempt)
+{
+    constexpr int kMaxAttempts = 20;
+    constexpr int kIntervalMs  = 100;
+
+    auto* input = session ? session->getInputManager() : nullptr;
+    if (input == nullptr) {
+        finishPadChoice();
+        return;
+    }
+
+    const auto availability = input->extendedInput().availability();
+    const bool backendUsable =
+        availability == ExtendedInputManager::Availability::Available;
+
+    if (!backendUsable) {
+        brls::Logger::info("PadChoice: no backend to wait for, deciding now");
+        finishPadChoice();
+        return;
+    }
+
+    for (const auto& pad : input->describePads()) {
+        if (pad.kind == akira::input::PadPathKind::McPsNative ||
+            pad.kind == akira::input::PadPathKind::McGeneric) {
+            brls::Logger::info("PadChoice: backend named a pad after {}ms",
+                               attempt * kIntervalMs);
+            finishPadChoice();
+            return;
+        }
+    }
+
+    if (attempt >= kMaxAttempts) {
+        brls::Logger::info("PadChoice: no backend pad after {}ms, deciding anyway",
+                           attempt * kIntervalMs);
+        finishPadChoice();
+        return;
+    }
+
+    auto weak = weak_from_this();
+    brls::delay(kIntervalMs, [weak, attempt]() {
+        if (auto self = weak.lock())
+            self->waitForPads(attempt + 1);
+    });
+}
+
+void StreamView::finishPadChoice()
+{
+    padChoiceDone = true;
+
+    auto* input = session ? session->getInputManager() : nullptr;
+    if (input == nullptr) {
+        startStream();
+        return;
+    }
+
+    auto pads = input->describePads();
+
+    {
+        AkiraInputDeviceList devices{};
+        if (input->extendedInput().listDevices(&devices)) {
+            brls::Logger::info("PadChoice: backend lists {} device(s)", devices.count);
+            for (uint8_t i = 0; i < devices.count && i < AKIRA_INPUT_MAX_LISTED_DEVICES; i++) {
+                const AkiraInputDeviceInfo& d = devices.devices[i];
+                brls::Logger::info(
+                    "PadChoice:   {:04x}:{:04x} report=0x{:02x} flags=0x{:02x}{}{}{}",
+                    d.vendor_id, d.product_id, d.report_id, d.flags,
+                    (d.flags & AkiraInputDevice_Identified) ? " identified" : "",
+                    (d.flags & AkiraInputDevice_Reporting)  ? " reporting"  : "",
+                    (d.flags & AkiraInputDevice_Claimed)    ? " claimed"    : "");
+            }
+        } else {
+            brls::Logger::warning("PadChoice: listDevices failed");
+        }
+    }
+
+    for (const auto& pad : pads) {
+        brls::Logger::info("PadChoice: npad {} {} [{}{}]",
+                           (int)pad.npad, pad.label,
+                           pad.caps.analog_triggers ? "analog " : "",
+                           pad.caps.touchpad ? "touch " : "");
+    }
+
+    if (!ControllerPickerView::worthAsking(pads)) {
+        brls::Logger::info("PadChoice: {} pad(s), nothing worth asking", pads.size());
+        for (const auto& pad : pads) {
+            if (pad.caps.analog_triggers || pad.caps.touchpad) {
+                input->selectNpad(pad.npad);
+                break;
+            }
+        }
+        startStream();
+        return;
+    }
+
+    brls::Logger::info("PadChoice: asking between {} pads", pads.size());
+
+    auto weak = weak_from_this();
+    auto describe = [weak]() -> std::vector<akira::input::PadDescription> {
+        if (auto self = weak.lock()) {
+            if (auto* mgr = self->session ? self->session->getInputManager() : nullptr)
+                return mgr->describePads();
+        }
+        return {};
+    };
+
+    auto* picker = new ControllerPickerView(pads, [weak](HidNpadIdType npad) {
+        auto self = weak.lock();
+
+        if (npad == ControllerPickerView::kCancelled) {
+            if (self)
+                self->abandonBeforeStart();
+            else
+                brls::Application::popActivity();
+            return;
+        }
+
+        brls::Application::popActivity();
+
+        if (!self)
+            return;
+
+        if (npad != ControllerPickerView::kNoChoice) {
+            if (auto* mgr = self->session ? self->session->getInputManager() : nullptr)
+                mgr->selectNpad(npad);
+        }
+        self->startStream();
+    }, describe);
+
+    brls::Application::pushActivity(new brls::Activity(picker),
+                                    brls::TransitionAnimation::NONE);
+}
+
 void StreamView::startStream()
 {
     if (sessionStarted)
+    {
+        return;
+    }
+
+    if (beginPadChoice())
     {
         return;
     }
@@ -154,10 +334,14 @@ void StreamView::startStream()
             profile = SettingsManager::StreamProfile::Vpn;
         settings->setActiveStreamProfile(profile);
 
-        if (!session->InitController())
+        if (!controllerReady)
         {
-            brls::Logger::error("Failed to initialize controller");
-            throw Exception("akira/stream/failed_init_controller"_i18n);
+            if (!session->InitController())
+            {
+                brls::Logger::error("Failed to initialize controller");
+                throw Exception("akira/stream/failed_init_controller"_i18n);
+            }
+            controllerReady = true;
         }
 
         if (host->isRemote())
@@ -377,6 +561,16 @@ void StreamView::streamingTick()
 
     host->sendFeedbackState();
 
+    if (auto* input = session->getInputManager())
+    {
+        if (input->extendedInput().consumeDegradedNotice())
+        {
+            brls::sync([]() {
+                brls::Application::notify("akira/settings/analog_triggers_degraded"_i18n);
+            });
+        }
+    }
+
     if (!session->MainLoop())
     {
         brls::Application::setSwapInterval(1);
@@ -585,12 +779,17 @@ void StreamView::onLoginPinRequest(bool pinIncorrect)
 
 void StreamView::checkMenuTrigger()
 {
-    PadState pad;
-    padInitializeDefault(&pad);
-    padUpdate(&pad);
-    u64 buttons = padGetButtons(&pad);
+    bool minusPressed = false;
 
-    bool minusPressed = (buttons & HidNpadButton_Minus) != 0;
+    auto* input = session ? session->getInputManager() : nullptr;
+    if (input != nullptr && input->path() != nullptr) {
+        minusPressed = input->path()->menuHeld();
+    } else {
+        PadState pad;
+        padInitializeDefault(&pad);
+        padUpdate(&pad);
+        minusPressed = (padGetButtons(&pad) & HidNpadButton_Minus) != 0;
+    }
 
     static int checkCount = 0;
     if (minusPressed && checkCount++ % 30 == 0) {
@@ -678,6 +877,26 @@ void StreamView::showDisconnectMenu()
 
     brls::Application::pushActivity(new brls::Activity(menu));
     brls::Logger::info("showDisconnectMenu: menu opened");
+}
+
+void StreamView::abandonBeforeStart()
+{
+    brls::Logger::info("Pad choice abandoned before the stream started");
+
+    intentionalDisconnect = true;
+    padChoiceDone         = false;
+    controllerReady       = false;
+
+    if (session)
+        session->FreeController();
+
+    brls::Application::forceUnblockInputs();
+
+    SharedViewHolder::release(this);
+
+    brls::Application::popActivity(brls::TransitionAnimation::NONE, []() {
+        brls::Application::popActivity();
+    });
 }
 
 void StreamView::disconnectWithSleep(bool sleep)

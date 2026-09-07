@@ -39,6 +39,15 @@ struct Register {
         }                                                                   \
     } while (0)
 
+#define REQUIRE(cond)                                                       \
+    do {                                                                    \
+        if (!(cond)) {                                                      \
+            std::printf("      %s:%d: REQUIRE(%s)\n", __FILE__, __LINE__, #cond); \
+            tests::failures++;                                              \
+            return;                                                         \
+        }                                                                   \
+    } while (0)
+
 #define CHECK_EQ(actual, expected)                                          \
     do {                                                                    \
         auto actualValue = (actual);                                        \

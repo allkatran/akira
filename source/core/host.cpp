@@ -4,6 +4,8 @@
 #include "core/settings_manager.hpp"
 #include "core/wireguard_manager.hpp"
 #include "core/discovery_manager.hpp"
+#include "input/pad_path.hpp"
+#include "input/rumble_profile.hpp"
 
 #include <borealis.hpp>
 #include <cstring>
@@ -12,6 +14,24 @@
 #include <chrono>
 
 #include <chiaki/base64.h>
+
+static akira::input::RumbleProfile ActivePadProfile()
+{
+    auto* settings = SettingsManager::getInstance();
+    const std::vector<akira::input::PadDescription> pads = akira::input::DescribePads();
+
+    if (pads.empty())
+        return settings->getRumbleProfile(akira::input::kRumbleKeyDefault);
+
+    const akira::input::PadDescription& pad = pads.front();
+    const bool switchNative = pad.kind == akira::input::PadPathKind::JoyCon
+                           || pad.kind == akira::input::PadPathKind::SwitchPro;
+
+    return settings->resolveRumbleProfile(pad.vendor_id, pad.product_id,
+                                          pad.has_address ? pad.bt_addr : nullptr,
+                                          switchNative,
+                                          pad.kind == akira::input::PadPathKind::JoyCon);
+}
 
 static void InitAudioCallback(unsigned int channels, unsigned int rate, void* user)
 {
@@ -574,32 +594,28 @@ int Host::initSessionWithHolepunch(Session* streamSession, ChiakiHolepunchSessio
         connectInfo.video_profile.codec == CHIAKI_CODEC_H265
     );
 
-    HapticPreset hapticSetting = settings->getHaptic(this);
-    int effectiveHaptic = static_cast<int>(hapticSetting);
-    brls::Logger::info("Host::initSession: haptic={} (per-host={})", effectiveHaptic, haptic);
-    if (effectiveHaptic > 0)
-    {
-        connectInfo.enable_dualsense = true;
-        brls::Logger::info("Host::initSession: enable_dualsense=true");
-        if (effectiveHaptic == 1)
-        {
-            streamSession->setHapticBase(128);
-            streamSession->setRumbleStrength(0.5f);
-        }
-        else
-        {
-            streamSession->setHapticBase(50);
-            streamSession->setRumbleStrength(1.0f);
-        }
-    }
-    else
-    {
-        brls::Logger::info("Host::initSession: enable_dualsense=false (haptic disabled)");
-        streamSession->setRumbleStrength(0.0f);
-    }
-    streamSession->setRumbleFreqs(settings->getRumbleFreqLow(), settings->getRumbleFreqHigh());
-    streamSession->setEnvelopeDecay(settings->getRumbleEnvelopeDecay());
-    streamSession->setEnvelopeAttack(settings->getRumbleEnvelopeAttack());
+    const akira::input::RumbleProfile padProfile = ActivePadProfile();
+
+    connectInfo.enable_dualsense = true;
+    streamSession->setRumbleStrength(padProfile.rumble_source == akira::input::RumbleSource::Off
+                                         ? 0.0f
+                                         : padProfile.strength);
+    streamSession->setRumbleSource(padProfile.rumble_source);
+    streamSession->setHapticBase(
+        akira::input::HapticBaseForIntensity(padProfile.haptic_intensity));
+
+    streamSession->setRumbleFreqs(padProfile.freq_low, padProfile.freq_high);
+    streamSession->setEnvelopeAttack(padProfile.envelope_attack);
+    streamSession->setEnvelopeDecay(padProfile.envelope_decay);
+    streamSession->setRumbleCeiling(padProfile.ceiling);
+
+    brls::Logger::info("Host::initSession: rumble source={} intensity={} strength={:.2f}"
+                       " ceiling={:.2f} freq={:.0f}/{:.0f} envelope={:.2f}/{:.2f}",
+                       (int)padProfile.rumble_source,
+                       (int)padProfile.haptic_intensity,
+                       padProfile.strength, padProfile.ceiling,
+                       padProfile.freq_low, padProfile.freq_high,
+                       padProfile.envelope_attack, padProfile.envelope_decay);
 
     connectInfo.ps5 = isPS5();
 
@@ -810,6 +826,42 @@ void Host::connectionEventCallback(ChiakiEvent* event)
             if (onQuit)
             {
                 onQuit(&event->quit);
+            }
+            break;
+
+        case CHIAKI_EVENT_TRIGGER_EFFECTS:
+            if (SettingsManager::getInstance()->getDebugChiakiLog())
+                brls::Logger::info("TRIGGER EFFECTS EVENT: left type=0x{:02x}, right type=0x{:02x}",
+                                   event->trigger_effects.type_left,
+                                   event->trigger_effects.type_right);
+            if (onTriggerEffects)
+            {
+                onTriggerEffects(&event->trigger_effects);
+            }
+            break;
+
+        case CHIAKI_EVENT_HAPTIC_INTENSITY:
+        case CHIAKI_EVENT_TRIGGER_INTENSITY:
+            if (event->type == CHIAKI_EVENT_HAPTIC_INTENSITY)
+                hapticIntensity = (uint8_t)event->intensity;
+            else
+                triggerIntensity = (uint8_t)event->intensity;
+
+            brls::Logger::info("EventCB intensity: haptics={} triggers={}",
+                               hapticIntensity, triggerIntensity);
+
+            if (onEffectIntensity)
+            {
+                onEffectIntensity(hapticIntensity, triggerIntensity);
+            }
+            break;
+
+        case CHIAKI_EVENT_LED_COLOR:
+            brls::Logger::info("EventCB CHIAKI_EVENT_LED_COLOR: {:02x}{:02x}{:02x}",
+                               event->led_state[0], event->led_state[1], event->led_state[2]);
+            if (onLedColor)
+            {
+                onLedColor(event->led_state[0], event->led_state[1], event->led_state[2]);
             }
             break;
 
